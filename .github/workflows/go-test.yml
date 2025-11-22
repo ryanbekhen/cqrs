@@ -1,0 +1,122 @@
+name: Go Tests & Coverage
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: true
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.21
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          # Go pkg cache
+          ~/.cache/go-mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Run tests (exclude example/generate)
+      env:
+        GOFLAGS: "-mod=mod"
+      run: |
+        set -euo pipefail
+        # list packages and exclude example/generate
+        PKGS=$(go list ./... | grep -v '/example/generate' | tr '\n' ' ')
+        echo "Testing packages: $PKGS"
+        go test -v -covermode=atomic -coverprofile=coverage.out $PKGS
+
+    - name: Check coverage threshold
+      run: |
+        set -euo pipefail
+        # compute total coverage percentage
+        PCT=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//' )
+        echo "Total coverage: ${PCT}%"
+        # convert to integer for comparison
+        PCT_INT=${PCT%.*}
+        echo "Coverage integer: ${PCT_INT}"
+        if [ "${PCT_INT}" -lt 80 ]; then
+          echo "Coverage ${PCT}% is below threshold 80%" >&2
+          exit 1
+        fi
+
+    - name: Publish coverage JSON to branch
+      env:
+        GIT_COMMITTER_NAME: github-actions[bot]
+        GIT_COMMITTER_EMAIL: github-actions[bot]@users.noreply.github.com
+      run: |
+        set -euo pipefail
+        # compute coverage percent (e.g. 100.0)
+        PCT=$(go tool cover -func=coverage.out | awk '/total:/ {print $3}')
+        PCT_MSG="$PCT"
+        echo "Publishing coverage JSON for: $PCT_MSG"
+
+        # write shields-compatible JSON endpoint schema in workspace
+        mkdir -p .badges
+        printf '{"schemaVersion": 1, "label":"coverage", "message":"%s", "color":"brightgreen"}' "$PCT_MSG" > .badges/coverage.json
+
+        # attempt to read remote message field (if branch exists)
+        git fetch origin coverage-badge:refs/remotes/origin/coverage-badge || true
+        REMOTE_MSG=""
+        if git show origin/coverage-badge:.badges/coverage.json > /dev/null 2>&1; then
+          REMOTE_MSG=$(git show origin/coverage-badge:.badges/coverage.json 2>/dev/null | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' || true)
+          # extract the value between quotes and strip percent sign
+          REMOTE_MSG=$(echo "$REMOTE_MSG" | sed -E 's/"message"\s*:\s*"([0-9.]+)%?"/\1/' || true)
+        fi
+
+        # normalize local message (number only)
+        LOCAL_MSG=$(echo "$PCT_MSG" | sed -E 's/%?$//')
+
+        echo "Remote message value: '$REMOTE_MSG'"
+        echo "Local message value:  '$LOCAL_MSG'"
+
+        if [ -n "$REMOTE_MSG" ] && [ "$REMOTE_MSG" = "$LOCAL_MSG" ]; then
+          echo "Badge unchanged on remote (coverage ${PCT_MSG}); skipping push.";
+          exit 0
+        fi
+
+        # create an orphan branch locally and push only the badge file
+        ORIG_BRANCH=$(git rev-parse --abbrev-ref HEAD || true)
+        git checkout --orphan coverage-badge || true
+        git rm -rf . >/dev/null 2>&1 || true
+        git clean -fdx >/dev/null 2>&1 || true
+
+        # recreate badges folder and write the JSON now
+        mkdir -p .badges
+        printf '{"schemaVersion": 1, "label":"coverage", "message":"%s", "color":"brightgreen"}' "$PCT_MSG" > .badges/coverage.json
+
+        git add .badges/coverage.json
+        git -c user.name="$GIT_COMMITTER_NAME" -c user.email="$GIT_COMMITTER_EMAIL" commit -m "chore(badge): coverage json $PCT_MSG" || true
+
+        # push using the checkout's credentials (persist-credentials must be true)
+        git push --force origin HEAD:coverage-badge
+
+        # switch back to original branch
+        git checkout -f "$ORIG_BRANCH" || true
+
+    - name: Upload coverage report
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.out

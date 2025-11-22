@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # helper to append a line to a section variable using real newlines
+          append_section() {
+            # usage: append_section VARNAME LINE
+            local varname="$1"
+            local line="$2"
+            # if variable empty, set directly; else append with newline
+            if [ -z "${!varname-}" ]; then
+              printf -v "$varname" '%s' "$line"
+            else
+              printf -v "$varname" '%s\n%s' "${!varname}" "$line"
+            fi
+          }
+
+          # determine current tag (support both GITHUB_REF and GITHUB_REF_NAME)
+          if [ -n "${GITHUB_REF-}" ] && [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            CUR_TAG=${GITHUB_REF#refs/tags/}
+          else
+            CUR_TAG=${GITHUB_REF_NAME-}
+          fi
+
+          # fallback to git describe if still empty
+          if [ -z "${CUR_TAG-}" ]; then
+            CUR_TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+            CUR_TAG=${CUR_TAG:-unknown}
+          fi
+
+          echo "Generating changelog for tag: $CUR_TAG"
+
+          # find previous tag (by creation date) excluding current tag
+          PREV_TAG=$(git tag --sort=-creatordate | grep -v "^${CUR_TAG}$" | head -n1 || true)
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="$PREV_TAG..$CUR_TAG"
+          else
+            # if no previous tag found, include the last 200 commits as a reasonable history
+            RANGE="HEAD~200..HEAD"
+          fi
+
+          echo "Commit range: $RANGE"
+
+          # initialize sections
+          FEATURES=""
+          FIXES=""
+          DOCS=""
+          CHORES=""
+          REFACTORS=""
+          TESTS=""
+          CI=""
+          OTHER=""
+
+          # get commit subjects for the range
+          mapfile -t SUBJECTS < <(git log --pretty=format:%s "$RANGE" 2>/dev/null || true)
+
+          for subj in "${SUBJECTS[@]:-}"; do
+            [ -z "$subj" ] && continue
+            # strip leading bullets and trim
+            clean=$(echo "$subj" | sed -E 's/^\s*[-*]\s*//; s/^\s+|\s+$//g')
+
+            if echo "$clean" | grep -iE '^(feat|fix|docs|chore|refactor|test|ci)(\([^)]+\))?:' >/dev/null 2>&1; then
+              type_lower=$(echo "$clean" | sed -E 's/^([A-Za-z]+).*/\1/' | tr '[:upper:]' '[:lower:]')
+              line="- $clean"
+              case "$type_lower" in
+                feat) append_section FEATURES "$line" ;;
+                fix) append_section FIXES "$line" ;;
+                docs) append_section DOCS "$line" ;;
+                chore) append_section CHORES "$line" ;;
+                refactor) append_section REFACTORS "$line" ;;
+                test) append_section TESTS "$line" ;;
+                ci) append_section CI "$line" ;;
+                *) append_section OTHER "$line" ;;
+              esac
+            else
+              append_section OTHER "- $clean"
+            fi
+          done
+
+          # build changelog content
+          { echo "## Changes in $CUR_TAG";
+            [ -n "$(echo "$FEATURES" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Features"; echo "$FEATURES" | sed '/^$/d'; };
+            [ -n "$(echo "$FIXES" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Bug Fixes"; echo "$FIXES" | sed '/^$/d'; };
+            [ -n "$(echo "$DOCS" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Documentation"; echo "$DOCS" | sed '/^$/d'; };
+            [ -n "$(echo "$CHORES" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Chores"; echo "$CHORES" | sed '/^$/d'; };
+            [ -n "$(echo "$REFACTORS" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Refactors"; echo "$REFACTORS" | sed '/^$/d'; };
+            [ -n "$(echo "$TESTS" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Tests"; echo "$TESTS" | sed '/^$/d'; };
+            [ -n "$(echo "$CI" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### CI"; echo "$CI" | sed '/^$/d'; };
+            [ -n "$(echo "$OTHER" | tr -d '\n' | sed 's/ //g')" ] && { echo; echo "### Other"; echo "$OTHER" | sed '/^$/d'; };
+          } > CHANGELOG.md
+
+          echo "----- GENERATED CHANGELOG -----"
+          cat CHANGELOG.md || true
+          echo "-------------------------------"
+
+          # ensure we always set a release body (fallback if empty)
+          RELEASE_BODY=$(cat CHANGELOG.md || true)
+          if [ -z "$(echo "$RELEASE_BODY" | tr -d '\n' | sed 's/ //g')" ]; then
+            RELEASE_BODY="No changelog generated for $CUR_TAG"
+          fi
+
+          # write the output for other steps
+          echo "release_body<<EOF" >> "$GITHUB_OUTPUT"
+          printf "%s\n" "$RELEASE_BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.release_body }}
