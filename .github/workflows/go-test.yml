@@ -120,3 +120,109 @@ jobs:
       with:
         name: coverage-report
         path: coverage.out
+
+  # -----------------------------------------------------------------
+  # Matrix job: detect per-package test/benchmark and run tests+bench
+  # -----------------------------------------------------------------
+  find-tests-matrix:
+    name: Find test/benchmark packages (matrix)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.packages.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.21
+
+      - id: packages
+        name: Detect packages with tests or benchmarks
+        run: |
+          set -euo pipefail
+          echo "Detecting packages with tests or benchmarks..."
+
+          mapfile -t lines < <(go list -f '{{.ImportPath}}|{{.Dir}}' ./...)
+          pkgs=()
+          for line in "${lines[@]:-}"; do
+            pkg=${line%%|*}
+            dir=${line#*|}
+            if ls "$dir"/*_test.go >/dev/null 2>&1 || ls "$dir"/*_bench_test.go >/dev/null 2>&1; then
+              pkgs+=("$pkg")
+            fi
+          done
+
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "No test/benchmark packages found"
+            echo "matrix=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          MATRIX='['
+          first=1
+          for p in "${pkgs[@]}"; do
+            esc=$(printf '%s' "$p" | sed 's/"/\\"/g')
+            name=$(printf '%s' "$p" | tr '/' '-')
+            if [ "$first" -eq 1 ]; then
+              first=0
+            else
+              MATRIX+=', '
+            fi
+            MATRIX+="{\"pkg\":\"$esc\",\"name\":\"$name\"}"
+          done
+          MATRIX+=']'
+
+          echo "matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+
+  test-and-bench-matrix:
+    needs: find-tests-matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.find-tests-matrix.outputs.matrix) }}
+    name: Test+Bench — ${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: 1.21
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.cache/go-mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run tests + benchmarks for package
+        env:
+          GOFLAGS: "-mod=mod"
+        run: |
+          set -euo pipefail
+          echo "Running tests and benchmarks for package: ${{ matrix.pkg }}"
+          OUT_FILE="result-${{ matrix.name }}.txt"
+          COV_FILE="coverage-${{ matrix.name }}.out"
+
+          # Run tests + benchmarks; per-package coverage file
+          go test -v -bench=. -benchmem -coverprofile="$COV_FILE" -covermode=atomic "${{ matrix.pkg }}" 2>&1 | tee "$OUT_FILE"
+
+      - name: Upload results and coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: testbench-${{ matrix.name }}
+          path: |
+            result-${{ matrix.name }}.txt
+            coverage-${{ matrix.name }}.out
+
