@@ -1,5 +1,11 @@
 # go-cqrs
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/ryanbekhen/cqrs.svg)](https://pkg.go.dev/github.com/ryanbekhen/cqrs)
+[![Coverage Status](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/ryanbekhen/cqrs/coverage-badge/.badges/coverage.json)](https://codecov.io/gh/ryanbekhen/cqrs)
+[![License](https://img.shields.io/github/license/ryanbekhen/cqrs?style=flat-square)](LICENSE)
+
+[English](./README.md) | [Bahasa Indonesia](./README-id.md)
+
 Implementasi minimal pola CQRS (Command Query Responsibility Segregation) untuk Go.
 
 ## Ringkasan
