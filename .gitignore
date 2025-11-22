@@ -1,0 +1,54 @@
+# Binaries for programs and plugins
+/bin/
+/build/
+/out/
+/dist/
+
+# Compiled object files and shared libraries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binaries and coverage
+*.test
+coverage.out
+profile.out
+
+# Vendor directory (if you vendor dependencies)
+/vendor/
+
+# Go workspace files
+go.work
+go.work.sum
+
+# IDE/editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules (if any example apps use node)
+node_modules/
+
+# Logs
+*.log
+
+# Backup/orig files
+*.orig
+
+# Temporary files
+tmp/
+temp/
+
+# Example: ignore local binary built by 'go build' in example folders
+/example/**/bin/
+
+# keep go.sum in repo (do not ignore)
+
