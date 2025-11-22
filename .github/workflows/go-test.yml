@@ -42,9 +42,39 @@ jobs:
       run: |
         set -euo pipefail
         # list packages and exclude example/generate
-        PKGS=$(go list ./... | grep -v '/example/generate' | tr '\n' ' ')
+        # Only include packages that have *_test.go files to avoid failing coverprofile runs
+        PKG_LINES=$(go list -f '{{.ImportPath}}|{{.Dir}}' ./... | grep -v '/example/generate' || true)
+        PKGS=""
+        for line in $PKG_LINES; do
+          pkg=${line%%|*}
+          dir=${line#*|}
+          if ls "$dir"/*_test.go >/dev/null 2>&1; then
+            PKGS="$PKGS $pkg"
+          fi
+        done
+        PKGS=$(echo "$PKGS" | xargs)
         echo "Testing packages: $PKGS"
-        go test -v -covermode=atomic -coverprofile=coverage.out $PKGS
+
+        # Run tests per-package and merge coverage profiles without covdata
+        rm -f coverage.out
+        first=1
+        for pkg in $PKGS; do
+          # make a safe filename for the package
+          safe=$(echo "$pkg" | tr '/' '-')
+          covfile="coverage-${safe}.out"
+
+          echo "Running tests for package: $pkg"
+          go test -v -covermode=atomic -coverprofile="$covfile" "$pkg"
+
+          if [ "$first" -eq 1 ]; then
+            # keep mode line for the first file
+            cat "$covfile" >> coverage.out
+            first=0
+          else
+            # skip the first line (mode: ...) for subsequent files
+            tail -n +2 "$covfile" >> coverage.out
+          fi
+        done
 
     - name: Check coverage threshold
       run: |
@@ -225,4 +255,3 @@ jobs:
           path: |
             result-${{ matrix.name }}.txt
             coverage-${{ matrix.name }}.out
-
