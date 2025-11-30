@@ -13,24 +13,27 @@ var (
 
 type Command interface{}
 
-type CommandHandler[C Command] interface {
-	Handle(ctx context.Context, cmd C) error
+type CommandHandler[C Command, R any] interface {
+	Handle(ctx context.Context, cmd C) (R, error)
 }
 
-func RegisterCommand[C Command](h CommandHandler[C]) {
-	t := reflect.TypeOf(*new(C))
+func RegisterCommand[C Command, R any](h CommandHandler[C, R]) {
+	var c C
+	t := reflect.TypeOf(c)
 	muCommands.Lock()
 	defer muCommands.Unlock()
 	cmdHandlers[t] = h
 }
 
-func Dispatch[C Command](ctx context.Context, cmd C) error {
+func DispatchCommand[C Command, R any](ctx context.Context, cmd C) (R, error) {
+	var zero R
+
 	t := reflect.TypeOf(cmd)
 	muCommands.RLock()
-	defer muCommands.RUnlock()
 	h, ok := cmdHandlers[t]
+	muCommands.RUnlock()
 	if !ok {
-		return ErrCommandHandlerNotFound
+		return zero, ErrCommandHandlerNotFound
 	}
-	return h.(CommandHandler[C]).Handle(ctx, cmd)
+	return h.(CommandHandler[C, R]).Handle(ctx, cmd)
 }

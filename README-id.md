@@ -36,63 +36,7 @@ require github.com/ryanbekhen/cqrs latest
 
 ## Contoh Penggunaan
 
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "sync"
-    "time"
-
-    "github.com/ryanbekhen/cqrs"
-)
-
-type PingCommand struct{ Msg string }
-type PongEvent struct{ Reply string }
-
-// Command handler untuk PingCommand
-type PingHandler struct{}
-func (h *PingHandler) Handle(ctx context.Context, cmd PingCommand) error {
-    // simulasi pekerjaan
-    time.Sleep(50 * time.Millisecond)
-    fmt.Println("Handled Ping:", cmd.Msg)
-    return cqrs.Publish(ctx, PongEvent{Reply: "pong: " + cmd.Msg})
-}
-
-// Event handler untuk PongEvent
-type PongHandler struct{}
-func (h *PongHandler) Handle(ctx context.Context, e PongEvent) error {
-    fmt.Println("Received Pong:", e.Reply)
-    return nil
-}
-
-func main() {
-    ctx := context.Background()
-
-    // daftar handler
-    cqrs.RegisterEvent(&PongHandler{})
-    cqrs.RegisterCommand(&PingHandler{})
-
-    const numCommands = 10
-    var wg sync.WaitGroup
-    wg.Add(numCommands)
-
-    for i := 1; i <= numCommands; i++ {
-        i := i
-        go func() {
-            defer wg.Done()
-            cmd := PingCommand{Msg: fmt.Sprintf("msg-%d", i)}
-            if err := cqrs.Dispatch(ctx, cmd); err != nil {
-                fmt.Println("Error dispatching command:", err)
-            }
-        }()
-    }
-
-    wg.Wait()
-    fmt.Println("All commands processed")
-}
-```
+Lihat di folder `example`.
 
 ## API (Ringkasan)
 
@@ -103,8 +47,8 @@ Tipe dasar:
 - `type Query interface{}`
 
 Command:
-- `RegisterCommand[C Command](h CommandHandler[C])` — daftarkan handler untuk command bertipe C.
-- `Dispatch[C Command](ctx context.Context, cmd C) error` — kirim command ke handler.
+- `RegisterCommand[C Command, R any](h CommandHandler[C, R])` — daftarkan handler untuk command bertipe C.
+- `DispatchCommand[C Command, R any](ctx context.Context, cmd C) (R, error)` — kirim command ke handler.
 
 Event:
 - `RegisterEvent[E Event](h EventHandler[E])` — daftarkan event handler (banyak handler diperbolehkan).

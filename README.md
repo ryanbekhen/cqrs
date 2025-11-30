@@ -36,63 +36,7 @@ require github.com/ryanbekhen/cqrs latest
 
 ## Usage Example
 
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "sync"
-    "time"
-
-    "github.com/ryanbekhen/cqrs"
-)
-
-type PingCommand struct{ Msg string }
-type PongEvent struct{ Reply string }
-
-// Command handler for PingCommand
-type PingHandler struct{}
-func (h *PingHandler) Handle(ctx context.Context, cmd PingCommand) error {
-    // simulate work
-    time.Sleep(50 * time.Millisecond)
-    fmt.Println("Handled Ping:", cmd.Msg)
-    return cqrs.Publish(ctx, PongEvent{Reply: "pong: " + cmd.Msg})
-}
-
-// Event handler for PongEvent
-type PongHandler struct{}
-func (h *PongHandler) Handle(ctx context.Context, e PongEvent) error {
-    fmt.Println("Received Pong:", e.Reply)
-    return nil
-}
-
-func main() {
-    ctx := context.Background()
-
-    // register handlers
-    cqrs.RegisterEvent(&PongHandler{})
-    cqrs.RegisterCommand(&PingHandler{})
-
-    const numCommands = 10
-    var wg sync.WaitGroup
-    wg.Add(numCommands)
-
-    for i := 1; i <= numCommands; i++ {
-        i := i
-        go func() {
-            defer wg.Done()
-            cmd := PingCommand{Msg: fmt.Sprintf("msg-%d", i)}
-            if err := cqrs.Dispatch(ctx, cmd); err != nil {
-                fmt.Println("Error dispatching command:", err)
-            }
-        }()
-    }
-
-    wg.Wait()
-    fmt.Println("All commands processed")
-}
-```
+See the `example` folder.
 
 ## API (Summary)
 
@@ -103,8 +47,8 @@ Core types:
 - `type Query interface{}`
 
 Commands:
-- `RegisterCommand[C Command](h CommandHandler[C])` — register a handler for command type C.
-- `Dispatch[C Command](ctx context.Context, cmd C) error` — dispatch a command to its handler.
+- `RegisterCommand[C Command, R any](h CommandHandler[C, R])` — register a handler for command type C.
+- `DispatchCommand[C Command, R any](ctx context.Context, cmd C) (R, error)` — dispatch a command to its handler.
 
 Events:
 - `RegisterEvent[E Event](h EventHandler[E])` — register an event handler (multiple handlers allowed).

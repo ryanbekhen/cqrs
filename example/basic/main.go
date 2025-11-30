@@ -14,11 +14,14 @@ type PongEvent struct{ Reply string }
 
 type PingHandler struct{}
 
-func (h *PingHandler) Handle(ctx context.Context, cmd PingCommand) error {
+func (h *PingHandler) Handle(ctx context.Context, cmd *PingCommand) (any, error) {
 	// simulate work
 	time.Sleep(50 * time.Millisecond)
 	fmt.Println("Handled Ping:", cmd.Msg)
-	return cqrs.Publish(ctx, PongEvent{Reply: "pong: " + cmd.Msg})
+	if err := cqrs.Publish(ctx, PongEvent{Reply: "pong: " + cmd.Msg}); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
 type PongHandler struct{}
@@ -42,7 +45,7 @@ func main() {
 		i := i // capture loop variable
 		wg.Go(func() {
 			cmd := PingCommand{Msg: fmt.Sprintf("msg-%d", i)}
-			if err := cqrs.Dispatch(ctx, cmd); err != nil {
+			if _, err := cqrs.DispatchCommand[*PingCommand, any](ctx, &cmd); err != nil {
 				fmt.Println("Error dispatching command:", err)
 			}
 		})
